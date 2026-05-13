@@ -1,0 +1,37 @@
+{
+	"name": "pi-langfuse",
+	"version": "1.0.0",
+	"description": "Langfuse extension for Pi coding agent",
+	"type": "module",
+	"main": "index.ts",
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": [
+		"pi-package",
+		"langfuse",
+		"observability",
+		"tracing",
+		"monitoring",
+		"pi-coding-agent",
+		"extension"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"dependencies": {
+		"langfuse": "^3.0.0"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"license": "MIT",
+	"engines": {
+		"node": ">=22"
+	}
+}

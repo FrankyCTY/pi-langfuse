@@ -14,6 +14,7 @@ Langfuse provides open-source observability for LLM applications. This extension
 ## Features
 
 - **Complete Agent Traces**: Creates one trace per user prompt with a root `agent` observation containing the prompt input and final assistant output.
+- **REST fallback for self-hosted Langfuse**: Uses the Langfuse OpenTelemetry SDK first, then verifies that the trace is visible. If a self-hosted OTel ingestion pipeline accepts spans but does not materialize traces, the extension writes the run through Langfuse's REST ingestion API.
 - **Per-Request Generations**: Records a separate `generation` observation for every provider request, including the actual provider payload instead of only the original prompt.
 - **Final Message Capture**: Uses finalized assistant messages for generation and root outputs, so Langfuse shows what the user actually saw in Pi.
 - **Tool Observability**: Creates Langfuse `tool` observations for every tool call, including arguments, results, and error states.

@@ -1,7 +1,16 @@
 declare module "node:fs" {
+  export function mkdirSync(path: string, options?: { recursive?: boolean }): void;
   export function readFileSync(path: string, encoding: string): string;
   export function existsSync(path: string): boolean;
   export function writeFileSync(path: string, data: string, encoding: string): void;
+}
+
+declare module "node:crypto" {
+  export function randomUUID(): string;
+}
+
+declare module "node:os" {
+  export function homedir(): string;
 }
 
 declare module "node:path" {

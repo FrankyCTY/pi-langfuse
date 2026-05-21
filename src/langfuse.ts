@@ -1,7 +1,276 @@
 import type { LangfuseRuntime, LangfuseScoreClient } from "./types.js";
 import { state } from "./state.js";
+import { randomUUID } from "node:crypto";
 
 let runtime: LangfuseRuntime | null = null;
+
+type FallbackObservationType = "SPAN" | "GENERATION";
+
+interface RestFallbackTrace {
+  id: string;
+  timestamp: string;
+  name: string;
+  input?: unknown;
+  output?: unknown;
+  sessionId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface RestFallbackObservation {
+  id: string;
+  traceId: string;
+  type: FallbackObservationType;
+  name: string;
+  startTime: string;
+  endTime?: string;
+  parentObservationId?: string;
+  input?: unknown;
+  output?: unknown;
+  metadata?: Record<string, unknown>;
+  model?: string;
+  usageDetails?: Record<string, number>;
+  costDetails?: Record<string, number>;
+  level?: "DEBUG" | "DEFAULT" | "WARNING" | "ERROR";
+  statusMessage?: string;
+  completionStartTime?: string;
+}
+
+interface RestFallbackStore {
+  trace?: RestFallbackTrace;
+  observations: RestFallbackObservation[];
+  observationById: Map<string, RestFallbackObservation>;
+  attempted: boolean;
+}
+
+const OTEL_VISIBILITY_DELAY_MS = 1_500;
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toIso(value: unknown): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return undefined;
+}
+
+function mergeMetadata(current: Record<string, unknown> | undefined, next: Record<string, unknown> | undefined) {
+  return next ? { ...(current ?? {}), ...next } : current;
+}
+
+function applyObservationUpdate(record: RestFallbackObservation, body: Record<string, unknown> | undefined) {
+  if (!body) {
+    return;
+  }
+
+  if ("input" in body) record.input = body.input;
+  if ("output" in body) record.output = body.output;
+  if ("metadata" in body && body.metadata && typeof body.metadata === "object") {
+    record.metadata = mergeMetadata(record.metadata, body.metadata as Record<string, unknown>);
+  }
+  if (typeof body.model === "string") record.model = body.model;
+  if (body.usageDetails && typeof body.usageDetails === "object") {
+    record.usageDetails = body.usageDetails as Record<string, number>;
+  }
+  if (body.costDetails && typeof body.costDetails === "object") {
+    record.costDetails = body.costDetails as Record<string, number>;
+  }
+  if (typeof body.level === "string") record.level = body.level as RestFallbackObservation["level"];
+  if (typeof body.statusMessage === "string") record.statusMessage = body.statusMessage;
+  const completionStartTime = toIso(body.completionStartTime);
+  if (completionStartTime) record.completionStartTime = completionStartTime;
+}
+
+function applyTraceUpdate(store: RestFallbackStore, body: Record<string, unknown> | undefined) {
+  if (!store.trace || !body) {
+    return;
+  }
+
+  if ("input" in body) store.trace.input = body.input;
+  if ("output" in body) store.trace.output = body.output;
+  if ("metadata" in body && body.metadata && typeof body.metadata === "object") {
+    store.trace.metadata = mergeMetadata(store.trace.metadata, body.metadata as Record<string, unknown>);
+  }
+}
+
+function observationType(asType?: string): FallbackObservationType {
+  return asType === "generation" ? "GENERATION" : "SPAN";
+}
+
+function wrapObservation(
+  observation: any,
+  store: RestFallbackStore,
+  name: string,
+  body: Record<string, unknown> | undefined,
+  asType?: string,
+  parentObservationId?: string,
+): any {
+  const id = observation.id || randomUUID();
+  const traceId = observation.traceId || store.trace?.id || randomUUID();
+  const metadata = body?.metadata && typeof body.metadata === "object" ? body.metadata as Record<string, unknown> : undefined;
+  const record: RestFallbackObservation = {
+    id,
+    traceId,
+    name,
+    type: observationType(asType),
+    startTime: nowIso(),
+    parentObservationId,
+    metadata: mergeMetadata(metadata, asType && asType !== "generation" && asType !== "span" ? { langfuseObservationType: asType } : undefined),
+  };
+  applyObservationUpdate(record, body);
+
+  store.observations.push(record);
+  store.observationById.set(id, record);
+
+  if (!parentObservationId && !store.trace) {
+    store.trace = {
+      id: traceId,
+      timestamp: record.startTime,
+      name,
+      input: body?.input,
+      sessionId: typeof metadata?.sessionId === "string" ? metadata.sessionId : state.currentSessionId || undefined,
+      metadata,
+    };
+  }
+
+  return {
+    ...observation,
+    id,
+    traceId,
+    update(updateBody?: Record<string, unknown>) {
+      applyObservationUpdate(record, updateBody);
+      if (!parentObservationId) {
+        applyTraceUpdate(store, updateBody);
+      }
+      const updated = observation.update(updateBody);
+      return updated === observation ? this : updated;
+    },
+    end(endBody?: Record<string, unknown>) {
+      if (endBody && typeof endBody === "object") {
+        applyObservationUpdate(record, endBody);
+        if (!parentObservationId) {
+          applyTraceUpdate(store, endBody);
+        }
+      }
+      record.endTime = nowIso();
+      return observation.end();
+    },
+    startObservation(childName: string, childBody?: Record<string, unknown>, options?: { asType?: string }) {
+      const child = observation.startObservation(childName, childBody, options);
+      return wrapObservation(child, store, childName, childBody, options?.asType, id);
+    },
+    setTraceIO(traceBody?: { input?: unknown; output?: unknown }) {
+      applyTraceUpdate(store, traceBody);
+      return observation.setTraceIO?.(traceBody);
+    },
+  };
+}
+
+async function traceExists(rt: LangfuseRuntime, traceId: string): Promise<boolean> {
+  try {
+    const getTrace = rt.scoreClient.api?.trace?.get;
+    if (!getTrace) {
+      return false;
+    }
+    await getTrace(traceId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function eventTimestamp(record: { endTime?: string; startTime?: string; timestamp?: string }) {
+  return record.endTime ?? record.startTime ?? record.timestamp ?? nowIso();
+}
+
+async function fallbackToRestIngestion(rt: LangfuseRuntime) {
+  const store = rt.restFallback as RestFallbackStore | undefined;
+  if (!store?.trace || store.attempted) {
+    return;
+  }
+  store.attempted = true;
+
+  await delay(OTEL_VISIBILITY_DELAY_MS);
+  if (await traceExists(rt, store.trace.id)) {
+    return;
+  }
+
+  const trace = store.trace;
+  const batch: any[] = [
+    {
+      type: "trace-create",
+      id: randomUUID(),
+      timestamp: eventTimestamp(trace),
+      body: {
+        id: trace.id,
+        timestamp: trace.timestamp,
+        name: trace.name,
+        input: trace.input,
+        output: trace.output,
+        sessionId: trace.sessionId,
+        metadata: trace.metadata,
+      },
+    },
+  ];
+
+  for (const observation of store.observations) {
+    const body = {
+      id: observation.id,
+      traceId: observation.traceId,
+      name: observation.name,
+      startTime: observation.startTime,
+      endTime: observation.endTime,
+      input: observation.input,
+      output: observation.output,
+      metadata: observation.metadata,
+      level: observation.level,
+      statusMessage: observation.statusMessage,
+      parentObservationId: observation.parentObservationId,
+      ...(observation.type === "GENERATION"
+        ? {
+            completionStartTime: observation.completionStartTime,
+            model: observation.model,
+            usageDetails: observation.usageDetails,
+            costDetails: observation.costDetails,
+          }
+        : {}),
+    };
+    batch.push({
+      type: observation.type === "GENERATION" ? "generation-create" : "span-create",
+      id: randomUUID(),
+      timestamp: eventTimestamp(observation),
+      body,
+    });
+  }
+
+  const response = await rt.scoreClient.api?.ingestion?.batch?.({
+    batch,
+    metadata: {
+      source: "pi-langfuse",
+      fallback: "rest-ingestion",
+      reason: "otel-trace-not-visible-after-flush",
+    },
+  });
+
+  const responseBody = response as { errors?: unknown[] } | undefined;
+  const errors = Array.isArray(responseBody?.errors) ? responseBody.errors : [];
+  if (errors.length > 0) {
+    console.warn("📊 Langfuse: REST fallback ingestion reported errors", errors);
+  } else {
+    console.warn(`📊 Langfuse: OTel trace ${trace.id} was not visible; wrote fallback trace via REST ingestion`);
+  }
+}
 
 export async function getRuntime(): Promise<LangfuseRuntime> {
   if (!state.config) {
@@ -16,6 +285,12 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
       import("@langfuse/client"),
     ]);
 
+    const restFallback: RestFallbackStore = {
+      observations: [],
+      observationById: new Map(),
+      attempted: false,
+    };
+
     const spanProcessor = new LangfuseSpanProcessor({
       publicKey: state.config.publicKey,
       secretKey: state.config.secretKey,
@@ -25,7 +300,10 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
     tracing.setLangfuseTracerProvider(tracerProvider);
 
     runtime = {
-      startObservation: tracing.startObservation as unknown as LangfuseRuntime["startObservation"],
+      startObservation: ((name: string, body?: Record<string, unknown>, options?: { asType?: string }) => {
+        const observation = (tracing as any).startObservation(name, body, options);
+        return wrapObservation(observation, restFallback, name, body, options?.asType);
+      }) as unknown as LangfuseRuntime["startObservation"],
       propagateAttributes: tracing.propagateAttributes as unknown as LangfuseRuntime["propagateAttributes"],
       scoreClient: new LangfuseClient({
         publicKey: state.config.publicKey,
@@ -35,6 +313,7 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
       spanProcessor,
       tracerProvider,
       clearTracerProvider: () => tracing.setLangfuseTracerProvider(null),
+      restFallback,
     };
   }
 
@@ -47,9 +326,10 @@ export async function shutdownRuntime(): Promise<void> {
   }
 
   try {
+    await runtime.tracerProvider?.forceFlush?.();
+    await fallbackToRestIngestion(runtime);
     await runtime.scoreClient.flush?.();
     await runtime.scoreClient.shutdown?.();
-    await runtime.tracerProvider?.forceFlush?.();
     await runtime.tracerProvider?.shutdown?.();
   } catch (e) {
     console.warn("📊 Langfuse: Failed to flush/shutdown cleanly", e);

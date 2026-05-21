@@ -31,6 +31,14 @@ export interface ObservationUpdate {
 }
 
 export interface LangfuseScoreClient {
+  api?: {
+    trace?: {
+      get?: (traceId: string) => Promise<unknown>;
+    };
+    ingestion?: {
+      batch?: (request: unknown) => Promise<unknown>;
+    };
+  };
   score?: {
     create(body: {
       traceId?: string;
@@ -64,6 +72,7 @@ export interface LangfuseRuntime {
   spanProcessor?: { forceFlush?: () => Promise<void>; shutdown?: () => Promise<void> };
   tracerProvider?: { forceFlush?: () => Promise<void>; shutdown?: () => Promise<void> };
   clearTracerProvider?: () => void;
+  restFallback?: unknown;
 }
 
 export interface GenerationState {

@@ -1,6 +1,6 @@
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import type { Config } from "./types.js";
-import { CONFIG_PATH, DEFAULT_LANGFUSE_HOST } from "./constants.js";
+import { CONFIG_DIR, CONFIG_PATH, DEFAULT_LANGFUSE_HOST } from "./constants.js";
 import { state } from "./state.js";
 import { shutdownRuntime } from "./langfuse.js";
 
@@ -38,7 +38,12 @@ export function loadConfigFromEnv(): Config | null {
   };
 }
 
+export function loadConfig(): Config | null {
+  return loadConfigFromFile() || loadConfigFromEnv();
+}
+
 export function saveConfig(config: Config) {
+  mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
 }
 
@@ -79,7 +84,7 @@ async function saveConfigFromUI(ctx: any, config: Config): Promise<boolean> {
     return true;
   } catch (error) {
     console.warn("📊 Langfuse: Failed to save config.json", error);
-    ctx.ui.notify("Failed to save Langfuse config.json. Check extension directory permissions.", "error");
+    ctx.ui.notify(`Failed to save Langfuse config.json to ${CONFIG_PATH}. Check Pi config directory permissions.`, "error");
     state.config = null;
     return false;
   }
@@ -87,7 +92,7 @@ async function saveConfigFromUI(ctx: any, config: Config): Promise<boolean> {
 
 export async function ensureConfig(ctx: any): Promise<boolean> {
   if (!state.config) {
-    state.config = loadConfigFromEnv() || loadConfigFromFile();
+    state.config = loadConfig();
   }
 
   if (state.config) {
@@ -114,7 +119,7 @@ export async function promptForConfig(ctx: any): Promise<boolean> {
 
   const config = await collectConfigFromUI(ctx, "Manual setup requested");
   if (!config) {
-    state.config = loadConfigFromEnv() || loadConfigFromFile();
+    state.config = loadConfig();
     return false;
   }
 

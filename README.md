@@ -78,7 +78,7 @@ Run any `pi` command with the extension loaded. On first run without configurati
 2. **Langfuse secret key** — starts with `sk-lf-...`
 3. **Langfuse host** — defaults to `https://cloud.langfuse.com`
 
-The extension saves these to a local `config.json` (ignored by git).
+The extension saves these to `~/.pi/agent/pi-langfuse/config.json`, so package updates and reinstalls do not overwrite your Langfuse credentials.
 
 To re-run setup at any time:
 
@@ -86,7 +86,7 @@ To re-run setup at any time:
 /langfuse-setup
 ```
 
-### Method 2: Environment variables
+### Method 2: Environment variables (fallback)
 
 Set these before starting Pi:
 
@@ -96,11 +96,11 @@ export LANGFUSE_SECRET_KEY="sk-lf-xxxx"
 export LANGFUSE_BASE_URL="https://cloud.langfuse.com"  # optional; LANGFUSE_HOST is also supported
 ```
 
-The extension checks the local `config.json` first, then falls back to environment variables.
+The saved config file takes precedence. Environment variables are used only when `~/.pi/agent/pi-langfuse/config.json` does not exist or is incomplete, which avoids drift after re-running `/langfuse-setup`.
 
-### Method 3: Local config.json (development only)
+### Method 3: Persistent config.json
 
-For local development, create a `config.json` in the project root:
+For persistent local configuration, create or update `~/.pi/agent/pi-langfuse/config.json`:
 
 ```json
 {
@@ -110,7 +110,7 @@ For local development, create a `config.json` in the project root:
 }
 ```
 
-> **⚠️ Security**: `config.json` is not tracked by git. Never commit API keys to version control.
+> **⚠️ Security**: Keep `~/.pi/agent/pi-langfuse/config.json` private. Never commit API keys to version control.
 
 ## Usage
 
@@ -160,7 +160,6 @@ pi-langfuse/
 ├── index.ts            # Extension entrypoint and core logic
 ├── package.json        # Package metadata
 ├── tsconfig.json       # TypeScript configuration
-├── config.json         # Local credentials (git-ignored)
 ├── types/
 │   ├── pi-coding-agent.d.ts   # Pi extension API types
 │   └── node-shims.d.ts        # Node.js module shims

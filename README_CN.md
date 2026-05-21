@@ -78,7 +78,7 @@ pi link /path/to/pi-langfuse
 2. **Langfuse 密钥** — 以 `sk-lf-...` 开头
 3. **Langfuse 主机地址** — 默认为 `https://cloud.langfuse.com`
 
-扩展会将这些保存到本地的 `config.json`（被 git 忽略）。
+扩展会将这些保存到 `~/.pi/agent/pi-langfuse/config.json`，这样 Pi 更新、重装扩展时不会覆盖你的 Langfuse 凭据。
 
 随时重新运行设置：
 
@@ -86,7 +86,7 @@ pi link /path/to/pi-langfuse
 /langfuse-setup
 ```
 
-### 方式 2：环境变量
+### 方式 2：环境变量（兜底）
 
 在启动 Pi 前设置：
 
@@ -96,11 +96,11 @@ export LANGFUSE_SECRET_KEY="sk-lf-xxxx"
 export LANGFUSE_BASE_URL="https://cloud.langfuse.com"  # 可选；也支持 LANGFUSE_HOST
 ```
 
-扩展会先检查本地的 `config.json`，然后回退到环境变量。
+保存的配置文件优先级更高。只有当 `~/.pi/agent/pi-langfuse/config.json` 不存在或不完整时，扩展才会使用环境变量，这样重新运行 `/langfuse-setup` 后不会出现配置漂移。
 
-### 方式 3：本地 config.json（仅限开发）
+### 方式 3：持久化 config.json
 
-对于本地开发，在项目根目录创建 `config.json`：
+如需使用持久化本地配置，创建或更新 `~/.pi/agent/pi-langfuse/config.json`：
 
 ```json
 {
@@ -110,7 +110,7 @@ export LANGFUSE_BASE_URL="https://cloud.langfuse.com"  # 可选；也支持 LANG
 }
 ```
 
-> **⚠️ 安全提醒**：`config.json` 不会被 git 跟踪。切勿将 API 密钥提交到版本控制。
+> **⚠️ 安全提醒**：请保护好 `~/.pi/agent/pi-langfuse/config.json`。切勿将 API 密钥提交到版本控制。
 
 ## 使用
 
@@ -160,7 +160,6 @@ pi-langfuse/
 ├── index.ts            # 扩展入口和核心逻辑
 ├── package.json        # 包元数据
 ├── tsconfig.json       # TypeScript 配置
-├── config.json         # 本地凭据（git 忽略）
 ├── types/
 │   ├── pi-coding-agent.d.ts   # Pi 扩展 API 类型
 │   └── node-shims.d.ts        # Node.js 模块 shims

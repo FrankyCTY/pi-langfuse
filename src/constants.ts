@@ -1,11 +1,8 @@
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 
-// Since we are in src/constants.ts, EXT_DIR should point to the parent of src/ (the root of the extension)
-// We use `import.meta.url` which points to `src/constants.ts`.
-// `dirname` gives us `src/`, and `resolve(..., '..')` gives us the root.
-export const EXT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-export const CONFIG_PATH = resolve(EXT_DIR, "config.json");
+export const CONFIG_DIR = resolve(homedir(), ".pi", "agent", "pi-langfuse");
+export const CONFIG_PATH = resolve(CONFIG_DIR, "config.json");
 export const DEFAULT_LANGFUSE_HOST = "https://cloud.langfuse.com";
 
 export const MAX_STRING_LENGTH = 12_000;

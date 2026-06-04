@@ -5,34 +5,16 @@
 
 [**English**](./README.md) | [**简体中文**](./README_CN.md)
 
-Langfuse observability extension for [Pi Coding Agent](https://github.com/earendil-works/pi-coding-agent). Sends complete Pi agent runs to [Langfuse](https://langfuse.com) so you can inspect the user prompt, root agent workflow, every LLM generation, every tool call, final assistant response, usage, cost, and health scores in one trace.
+Langfuse observability extension for [Pi Coding Agent](https://github.com/earendil-works/pi-coding-agent). It sends complete Pi runs to [Langfuse](https://langfuse.com) so the prompt, agent workflow, LLM generations, tool calls, final response, usage, cost, and health scores appear in one trace.
 
-## Why Langfuse?
+## What This Adds to Pi
 
-Langfuse provides open-source observability for LLM applications. This extension allows you to **trace**, **monitor**, and **debug** your Pi sessions with production-grade detail, helping you understand exactly how your agent is performing, what it's costing you, and where it might be failing.
-
-## Features
-
-- **Complete Agent Traces**: Creates one trace per user prompt with a root `agent` observation containing the prompt input and final assistant output.
-- **REST fallback for self-hosted Langfuse**: Uses the Langfuse OpenTelemetry SDK first, then verifies that the trace is visible. If a self-hosted OTel ingestion pipeline accepts spans but does not materialize traces, the extension writes the run through Langfuse's REST ingestion API.
-- **Per-Request Generations**: Records a separate `generation` observation for every provider request, including the actual provider payload instead of only the original prompt.
-- **Final Message Capture**: Uses finalized assistant messages for generation and root outputs, so Langfuse shows what the user actually saw in Pi.
-- **Tool Observability**: Creates Langfuse `tool` observations for every tool call, including arguments, results, error states, and payload/latency metrics.
-- **Parallel Tool Safety**: Correlates tool observations by `toolCallId`, avoiding result mix-ups when Pi runs tools concurrently.
-- **Session Correlation**: Groups traces from the same Pi session under a shared Langfuse session ID.
-- **Cost and Token Tracking**: Records usage and cost details on each generation when Pi/provider payloads expose them.
-- **Evaluation Scores**: Automatically computes and sends tool success rates, error counts, and session health metrics.
-- **Defensive Payload Shaping**: Parses JSON-like strings when possible, limits object depth, and truncates large payloads before upload.
-
-## Highlights
-
-`pi-langfuse` is designed to make a Pi run readable as an agent workflow, not just a bag of logs:
-
-- The trace input/output mirrors the root `agent` observation, making the run understandable from the Langfuse trace list and detail view.
-- The first generation in a tool-using run can show the assistant's tool-call message, the tool observation shows execution I/O, and the follow-up generation shows the final natural-language answer.
-- Tool failures are marked on the tool observation and reflected in trace-level scores, while later generations still preserve the tool error result in their input history.
-- Shutdown and interrupted runs flush pending telemetry and mark unfinished observations as cancelled/warning instead of silently losing the trace.
-- Agent-end runtime shutdown is deferred so Langfuse flushing does not block Pi's visible turn completion.
+- One Langfuse trace per user prompt, grouped by Pi session.
+- Root `agent`, per-request `generation`, and per-tool `tool` observations.
+- Final assistant output capture, tool error visibility, and trace-level scores.
+- Privacy controls for inputs, outputs, tool I/O, system prompt, and cwd.
+- Secret redaction and local path hashing before upload.
+- REST fallback for self-hosted Langfuse setups where OTel spans arrive but traces do not materialize.
 
 ## Prerequisites
 
@@ -40,55 +22,42 @@ Langfuse provides open-source observability for LLM applications. This extension
 - **Pi Coding Agent** installed and configured
 - A **Langfuse** account ([cloud](https://cloud.langfuse.com) or self-hosted)
 
-## Installation
+## Quick Start
 
-### Option 1: Install via npm (recommended for users)
+1. Install the extension:
 
-```bash
-pi install npm:pi-langfuse
-```
+   ```bash
+   pi install npm:pi-langfuse
+   ```
 
-Pi will download the package and register it as an extension.
+2. Run Pi once. If no credentials are configured yet, Pi prompts for:
+   - Langfuse public key, starting with `pk-lf-...`
+   - Langfuse secret key, starting with `sk-lf-...`
+   - Langfuse host, defaulting to `https://cloud.langfuse.com`
 
-### Option 2: Install from local source (recommended for development)
+3. Run Pi normally:
 
-```bash
-git clone <your-repo-url>
-cd pi-langfuse
-npm install
-```
+   ```bash
+   pi "Explain the architecture of Redis"
+   ```
 
-Then tell Pi to use it:
-
-```bash
-pi link /path/to/pi-langfuse
-```
-
-Or run Pi from the project directory — Pi auto-discovers extensions in the current directory's `package.json`.
+4. Open Langfuse and inspect the new trace.
 
 ## Configuration
 
-You need Langfuse API keys. Get them from **Langfuse Cloud** → **Settings** → **API Keys**.
+Langfuse API keys are available in **Langfuse Cloud** -> **Settings** -> **API Keys**.
 
-There are three ways to configure the extension:
+### Method 1: Interactive setup
 
-### Method 1: Interactive setup (easiest)
+Run any `pi` command with the extension loaded. On first run without configuration, Pi prompts in the CLI or TUI and saves the result to `~/.pi/agent/pi-langfuse/config.json`.
 
-Run any `pi` command with the extension loaded. On first run without configuration, Pi will prompt you in the CLI or TUI for:
+To run setup again:
 
-1. **Langfuse public key** — starts with `pk-lf-...`
-2. **Langfuse secret key** — starts with `sk-lf-...`
-3. **Langfuse host** — defaults to `https://cloud.langfuse.com`
-
-The extension saves these to `~/.pi/agent/pi-langfuse/config.json`, so package updates and reinstalls do not overwrite your Langfuse credentials.
-
-To re-run setup at any time:
-
-```
+```text
 /langfuse-setup
 ```
 
-### Method 2: Environment variables (fallback)
+### Method 2: Environment variables
 
 Set these before starting Pi:
 
@@ -98,238 +67,125 @@ export LANGFUSE_SECRET_KEY="sk-lf-xxxx"
 export LANGFUSE_BASE_URL="https://cloud.langfuse.com"  # optional; LANGFUSE_HOST is also supported
 ```
 
-The saved config file takes precedence. Environment variables are used only when `~/.pi/agent/pi-langfuse/config.json` does not exist or is incomplete, which avoids drift after re-running `/langfuse-setup`.
+Saved config takes precedence. Environment variables are only used when `~/.pi/agent/pi-langfuse/config.json` is missing or incomplete.
 
-### Method 3: Persistent config.json
+Privacy controls can also be set through environment variables:
 
-For persistent local configuration, create or update `~/.pi/agent/pi-langfuse/config.json`:
+```bash
+export LANGFUSE_PRIVACY_PRESET="full-debug"
+```
+
+Available presets:
+
+| Preset | Captures |
+|--------|----------|
+| `metadata-only` | Metadata only; omits inputs, outputs, tool I/O, system prompt, and cwd |
+| `prompts-only` | Prompt/provider inputs plus metadata |
+| `conversations` | Inputs and assistant outputs, but omits tool I/O, system prompt, and cwd |
+| `full-debug` | Full trace detail; this is the default |
+
+Fine-grained flags override presets:
+
+```bash
+export LANGFUSE_CAPTURE_INPUTS=true
+export LANGFUSE_CAPTURE_OUTPUTS=true
+export LANGFUSE_CAPTURE_TOOL_IO=false
+export LANGFUSE_CAPTURE_SYSTEM_PROMPT=false
+export LANGFUSE_CAPTURE_CWD=false
+```
+
+All captured payloads are redacted before upload. The extension masks common API keys, bearer tokens, passwords, cookies, private keys, Langfuse keys, GitHub/npm/AWS-style tokens, and local absolute paths.
+
+### Method 3: Persistent `config.json`
+
+Create or update `~/.pi/agent/pi-langfuse/config.json`:
 
 ```json
 {
   "publicKey": "pk-lf-xxxx",
   "secretKey": "sk-lf-xxxx",
-  "host": "https://cloud.langfuse.com"
+  "host": "https://cloud.langfuse.com",
+  "privacyPreset": "conversations"
 }
 ```
 
-> **⚠️ Security**: Keep `~/.pi/agent/pi-langfuse/config.json` private. Never commit API keys to version control.
+Fine-grained capture flags can also be persisted:
 
-## Usage
-
-### Basic usage
-
-Run Pi as usual — the extension auto-loads and traces every agent run:
-
-```bash
-pi "Explain the architecture of Redis"
+```json
+{
+  "publicKey": "pk-lf-xxxx",
+  "secretKey": "sk-lf-xxxx",
+  "host": "https://cloud.langfuse.com",
+  "capture": {
+    "LANGFUSE_PRIVACY_PRESET": "metadata-only",
+    "LANGFUSE_CAPTURE_INPUTS": "true"
+  }
+}
 ```
 
-After the session ends, check your [Langfuse dashboard](https://cloud.langfuse.com) for the trace.
+> **Security**: Keep `~/.pi/agent/pi-langfuse/config.json` private. Never commit API keys to version control.
 
-### Verify the extension is loaded
+## Verify the Extension
+
+Check that Pi has loaded the package:
 
 ```bash
 pi list
 ```
 
-You should see `pi-langfuse` in the list of installed packages.
+`pi-langfuse` should appear in the installed package list.
 
-### Multiple sessions
+## What Appears in Langfuse
 
-Each Pi session gets its own Langfuse session ID. Each user prompt within that Pi session becomes a separate Langfuse trace grouped under the same session.
+- Each Pi session gets its own Langfuse session ID.
+- Each user prompt within that session becomes a separate trace.
+- The trace contains the final assistant output shown in Pi.
+- Tool runs appear as tool observations with arguments, results, and error state.
+- LLM requests appear as generation observations, including usage and cost when the provider exposes them.
+- Trace-level scores include tool counts, tool success rate, and whether the run had errors.
 
-## Development Setup
+The package also includes a Langfuse CLI skill, so Langfuse data can be queried directly from Pi:
 
-If you're contributing to this extension:
-
-```bash
-# Clone and install dependencies
-git clone <your-repo-url>
-cd pi-langfuse
-npm install
-
-# Type-check your changes
-npm run typecheck
-
-# Test with Pi
-pi "test prompt"
-```
-
-### Project structure
-
-```
-pi-langfuse/
-├── index.ts            # Extension entrypoint and core logic
-├── package.json        # Package metadata
-├── tsconfig.json       # TypeScript configuration
-├── types/
-│   ├── pi-coding-agent.d.ts   # Pi extension API types
-│   └── node-shims.d.ts        # Node.js module shims
-├── .agents/
-│   └── skills/
-│       └── langfuse/
-│           └── SKILL.md       # Langfuse CLI skill for data queries
-├── AGENTS.md           # Developer guide (extended)
-├── README.md           # This file
-├── README_CN.md        # Chinese translation
-└── AGENTS_CN.md        # Developer guide (Chinese)
-```
-
-### Validation
-
-There is no dedicated test suite yet. To validate changes:
-
-1. Run `npm run typecheck` for TypeScript errors
-2. Start Pi with the extension enabled
-3. Run a few prompts
-4. Confirm traces, the root agent observation, tool observations, generations, and evaluation scores appear in your Langfuse project
-
-## Trace Model
-
-```
-Trace (name: "pi-agent")
-├── Session ID: <pi-session-id>
-├── input:  user prompt, images/context summary when present
-├── output: final assistant response
-└── Agent observation (name: "pi-agent", type: agent)
-    ├── input:  current user prompt
-    ├── output: final assistant response
-    ├── Generation observation (name: "llm-generation", type: generation)
-    │   ├── input: provider request payload / message history
-    │   ├── output: finalized assistant message or tool-call message
-    │   ├── model, usageDetails, costDetails
-    │   └── metadata: provider/request details
-    └── Tool observation (name: "<tool-name>", type: tool)
-        ├── input: tool parameters
-        ├── output: tool result
-        └── metadata: toolCallId, isError
-```
-
-## What Gets Tracked
-
-### Trace Level
-| Field | Description |
-|-------|-------------|
-| `input` | User prompt, with images/context summary when available |
-| `output` | Final assistant response shown in Pi |
-| `sessionId` | Pi session identifier |
-| `metadata.model` | Model identifier (e.g., "MiniMax-M2.7") |
-| `metadata.provider` | LLM provider name |
-| `metadata.cwd` | Working directory |
-
-### Agent Observation (Root Workflow)
-| Field | Description |
-|-------|-------------|
-| `type` | `agent` |
-| `name` | `pi-agent` |
-| `input` | Current user prompt payload |
-| `output` | Final assistant response |
-| `metadata.sessionId` | Pi session identifier |
-| `metadata.cwd` | Working directory |
-| `metadata.model` | Selected model when available |
-| `metadata.provider` | Provider when available |
-
-### Evaluation Scores (Trace Level)
-
-| Score Name | Type | Description |
-|------------|------|-------------|
-| `tool_call_count` | number | Total tool calls in session |
-| `turn_count` | number | Number of assistant turns |
-| `total_tool_errors` | number | Tools that returned errors |
-| `tool_success_rate` | float (0-1) | Ratio of successful tool calls |
-| `session_had_errors` | 0 or 1 | Whether any tool errored |
-
-### Generation Observations (LLM Calls)
-| Field | Description |
-|-------|-------------|
-| `type` | `generation` |
-| `name` | `llm-generation` |
-| `input` | Actual provider request payload / message history |
-| `output` | Finalized assistant message, including tool-call payloads for tool-calling turns |
-| `model` | Model identifier (e.g., "MiniMax-M2.7") |
-| `usageDetails.input` | Input token count |
-| `usageDetails.output` | Output token count |
-| `usageDetails.total` | Total token count |
-| `costDetails.total` | Total cost in USD |
-| `costDetails.input` | Input cost in USD |
-| `costDetails.output` | Output cost in USD |
-| `metadata.provider` | Provider name |
-| `metadata.requestId` | Provider/Pi request identifier when available |
-| `metadata.status` | HTTP/provider status when available |
-
-### Tool Observations
-| Field | Description |
-|-------|-------------|
-| `type` | `tool` |
-| `name` | Tool name (e.g., "bash", "read") |
-| `input` | Tool parameters |
-| `output` | Tool result, shaped and truncated for readability |
-| `metadata.toolCallId` | Stable Pi tool call identifier |
-| `metadata.isError` | Whether the tool failed |
-| `metadata.durationMs` | Approximate tool runtime in milliseconds |
-| `metadata.inputBytes` | UTF-8 byte size of the shaped tool input payload |
-| `metadata.outputBytes` | UTF-8 byte size of the shaped tool output payload |
-| `level` | `ERROR` for failed tool calls, otherwise `DEFAULT` |
-
-### Observation-Level Scores
-| Score Name | Description |
-|------------|-------------|
-| `tool_is_error` | Value 1 assigned to individual tool observations that errored |
-
-## Langfuse Dashboard
-
-After running, check your Langfuse project for:
-
-1. **Traces** — All pi agent runs with I/O
-2. **Sessions** — Traces grouped by session ID
-3. **Observations** — Tool calls and LLM generations
-4. **Scores** — Evaluation metrics (tool errors, success rate, etc.)
-5. **Model Usage** — Usage breakdown by model
-
-You can also monitor your Langfuse data directly from the terminal using the built-in Langfuse skill:
-
-```
+```text
 /pi-langfuse-langfuse <your-query>
 ```
 
 ## Troubleshooting
 
 ### No traces appearing?
-- Verify API keys are correct — run `/langfuse-setup` to re-configure
-- Check your Langfuse project is active and has write capacity
-- Ensure API keys have write permissions (not read-only)
-- Look for `📊 Langfuse:` log messages in the Pi output
+
+- Verify the API keys and run `/langfuse-setup` again if needed.
+- Confirm the Langfuse project is active and accepts writes.
+- Confirm the keys have write permission.
+- Look for `📊 Langfuse:` log messages in Pi output.
 
 ### Extension not loading?
+
 ```bash
-pi list                      # Verify pi-langfuse is installed
-pi install npm:pi-langfuse   # Reinstall if missing
+pi list
+pi install npm:pi-langfuse
 ```
 
-### "Missing config" message on startup?
-- The extension needs credentials. Use the interactive `/langfuse-setup` command
-- Or set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` environment variables
+### "Missing config" on startup?
 
-### Model/cost not showing?
-- Not all providers expose cost information
-- Check the Langfuse traces API for raw observation data
-- The `model` field in generations comes from provider events, finalized assistant messages, `model_select`, or `ctx.model`
+- Run `/langfuse-setup`.
+- Or set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` before starting Pi.
+
+### Model or cost not showing?
+
+- Some providers do not expose cost information.
+- Inspect the raw observation data in Langfuse traces.
+- The `model` field can come from provider events, finalized assistant messages, `model_select`, or `ctx.model`.
 
 ### API key errors?
-- Langfuse public keys start with `pk-lf-`, secret keys with `sk-lf-`
-- If self-hosting, verify your host URL is correct
 
-## Dependencies
+- Public keys start with `pk-lf-`.
+- Secret keys start with `sk-lf-`.
+- For self-hosted deployments, verify the host URL.
 
-- [@langfuse/tracing](https://www.npmjs.com/package/@langfuse/tracing) — Langfuse observation API for `agent`, `generation`, and `tool` traces
-- [@langfuse/otel](https://www.npmjs.com/package/@langfuse/otel) — OpenTelemetry span processor for exporting traces to Langfuse
-- [@langfuse/client](https://www.npmjs.com/package/@langfuse/client) — Langfuse API client used for scores
-- [@opentelemetry/sdk-node](https://www.npmjs.com/package/@opentelemetry/sdk-node) — Node OpenTelemetry SDK
-- [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) — Pi extension API (peer dependency)
+## Development Docs
 
-## About Langfuse Skill
-
-This package includes a Langfuse CLI skill (at `.agents/skills/langfuse/`) that lets you query Langfuse data directly from Pi. Use it to look up traces, prompts, datasets, and scores without leaving the terminal. The skill is auto-registered when the extension is installed globally.
+Development setup, source installation, runtime architecture, trace model, tracked fields, and validation steps are documented in [DEVELOPMENT.md](./DEVELOPMENT.md) and [DEVELOPMENT_CN.md](./DEVELOPMENT_CN.md).
 
 ## License
 

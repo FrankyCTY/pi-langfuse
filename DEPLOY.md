@@ -66,7 +66,7 @@ npm pack --dry-run
 
 ```bash
 git add package.json package-lock.json
-git commit -m "release: v$(node -p 'require(\"./package.json\").version')"
+git commit -m "release: v$(node -p "require('./package.json').version")"
 git push origin main
 ```
 
@@ -75,7 +75,7 @@ git push origin main
 ### 5. 创建并推送 tag
 
 ```bash
-TAG="v$(node -p 'require(\"./package.json\").version')"
+TAG="v$(node -p "require('./package.json').version")"
 git tag -a "$TAG" -m "release: $TAG"
 git push origin "$TAG"
 ```
@@ -85,7 +85,7 @@ git push origin "$TAG"
 `publish.yml` 监听的是 Release 发布事件，因此这里必须创建 Release。
 
 ```bash
-TAG="v$(node -p 'require(\"./package.json\").version')"
+TAG="v$(node -p "require('./package.json').version")"
 gh release create "$TAG" \
   --title "$TAG" \
   --generate-notes
@@ -105,9 +105,9 @@ npm ci
 npm run typecheck
 npm pack --dry-run
 git add package.json package-lock.json
-git commit -m "release: v$(node -p 'require(\"./package.json\").version')"
+git commit -m "release: v$(node -p "require('./package.json').version")"
 git push origin main
-TAG="v$(node -p 'require(\"./package.json\").version')"
+TAG="v$(node -p "require('./package.json').version")"
 git tag -a "$TAG" -m "release: $TAG"
 git push origin "$TAG"
 gh release create "$TAG" --title "$TAG" --generate-notes
@@ -120,7 +120,7 @@ gh release create "$TAG" --title "$TAG" --generate-notes
 ```bash
 git checkout main
 git pull origin main
-TAG="v$(node -p 'require(\"./package.json\").version')"
+TAG="v$(node -p "require('./package.json').version")"
 git tag -a "$TAG" -m "release: $TAG"
 git push origin "$TAG"
 gh release create "$TAG" --title "$TAG" --generate-notes
@@ -147,7 +147,7 @@ npm view pi-langfuse version
 原因通常是只推送了 tag，没有创建 GitHub Release。补执行以下命令即可：
 
 ```bash
-TAG="v$(node -p 'require(\"./package.json\").version')"
+TAG="v$(node -p "require('./package.json').version")"
 gh release create "$TAG" --title "$TAG" --generate-notes
 ```
 

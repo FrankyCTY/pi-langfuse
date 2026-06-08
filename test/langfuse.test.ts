@@ -83,10 +83,13 @@ test("REST fallback calls Langfuse ingestion with its SDK receiver", async () =>
     },
   } satisfies LangfuseRuntime;
 
+  const logs: unknown[][] = [];
   const originalWarn = console.warn;
   const originalLog = console.log;
   console.warn = () => {};
-  console.log = () => {};
+  console.log = (...args: unknown[]) => {
+    logs.push(args);
+  };
 
   try {
     __setRuntimeForTest(runtime, 50);
@@ -94,6 +97,7 @@ test("REST fallback calls Langfuse ingestion with its SDK receiver", async () =>
     await forceShutdownRuntime();
 
     assert.equal(ingestion.called, true);
+    assert.deepEqual(logs, []);
   } finally {
     __setRuntimeForTest(null);
     console.warn = originalWarn;

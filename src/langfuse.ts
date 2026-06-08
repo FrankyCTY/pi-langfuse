@@ -57,6 +57,12 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function debugLog(message: string) {
+  if (process.env.PI_LANGFUSE_DEBUG === "1" || process.env.PI_LANGFUSE_DEBUG === "true") {
+    console.log(message);
+  }
+}
+
 async function withTimeout<T>(label: string, operation: Promise<T> | undefined): Promise<T | undefined> {
   if (!operation) {
     return undefined;
@@ -68,7 +74,7 @@ async function withTimeout<T>(label: string, operation: Promise<T> | undefined):
       operation,
       new Promise<undefined>((resolve) => {
         timeout = setTimeout(() => {
-          console.log(`📊 Langfuse: ${label} timed out after ${shutdownStepTimeoutMs}ms`);
+          debugLog(`📊 Langfuse: ${label} timed out after ${shutdownStepTimeoutMs}ms`);
           resolve(undefined);
         }, shutdownStepTimeoutMs);
       }),
@@ -303,7 +309,7 @@ async function fallbackToRestIngestion(rt: LangfuseRuntime) {
 
   const ingestionApi = rt.scoreClient.api?.ingestion;
   if (!ingestionApi?.batch) {
-    console.log("📊 Langfuse: REST fallback ingestion is unavailable");
+    debugLog("📊 Langfuse: REST fallback ingestion is unavailable");
     return;
   }
 
@@ -328,7 +334,7 @@ async function fallbackToRestIngestion(rt: LangfuseRuntime) {
   if (errors.length > 0) {
     console.warn("📊 Langfuse: REST fallback ingestion reported errors", errors);
   } else {
-    console.log(`📊 Langfuse: OTel trace ${trace.id} was not visible; wrote fallback trace via REST ingestion`);
+    debugLog(`📊 Langfuse: OTel trace ${trace.id} was not visible; wrote fallback trace via REST ingestion`);
   }
 }
 

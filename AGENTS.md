@@ -126,7 +126,7 @@ Run these checks after substantive changes:
 
 ```bash
 npm run typecheck
-node --test test/*.test.ts
+npm test
 ```
 
 For integration-sensitive changes, also run Pi with the extension enabled and confirm in Langfuse that:

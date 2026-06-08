@@ -24,7 +24,8 @@
 		"tsconfig.json"
 	],
 	"scripts": {
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "tsx --test test/*.test.ts"
 	},
 	"keywords": [
 		"pi-package",
@@ -60,6 +61,7 @@
 		"node": ">=22"
 	},
 	"devDependencies": {
+		"tsx": "^4.19.0",
 		"typescript": "^6.0.3"
 	}
 }

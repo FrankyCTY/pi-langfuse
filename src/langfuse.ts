@@ -45,6 +45,9 @@ interface RestFallbackStore {
 
 const OTEL_VISIBILITY_TIMEOUT_MS = 1_500;
 const OTEL_VISIBILITY_POLL_INTERVAL_MS = 200;
+const DEFAULT_SHUTDOWN_STEP_TIMEOUT_MS = 2_000;
+
+let shutdownStepTimeoutMs = DEFAULT_SHUTDOWN_STEP_TIMEOUT_MS;
 
 function nowIso() {
   return new Date().toISOString();
@@ -52,6 +55,29 @@ function nowIso() {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(label: string, operation: Promise<T> | undefined): Promise<T | undefined> {
+  if (!operation) {
+    return undefined;
+  }
+
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<undefined>((resolve) => {
+        timeout = setTimeout(() => {
+          console.log(`📊 Langfuse: ${label} timed out after ${shutdownStepTimeoutMs}ms`);
+          resolve(undefined);
+        }, shutdownStepTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 function toIso(value: unknown): string | undefined {
@@ -185,7 +211,10 @@ async function traceExists(rt: LangfuseRuntime, traceId: string): Promise<boolea
     if (!getTrace) {
       return false;
     }
-    await getTrace(traceId);
+    const trace = await withTimeout("Trace visibility check", getTrace(traceId));
+    if (!trace) {
+      return false;
+    }
     return true;
   } catch {
     return false;
@@ -272,21 +301,34 @@ async function fallbackToRestIngestion(rt: LangfuseRuntime) {
     });
   }
 
-  const response = await rt.scoreClient.api?.ingestion?.batch?.({
-    batch,
-    metadata: {
-      source: "pi-langfuse",
-      fallback: "rest-ingestion",
-      reason: "otel-trace-not-visible-after-flush",
-    },
-  });
+  const ingestionBatch = rt.scoreClient.api?.ingestion?.batch;
+  if (!ingestionBatch) {
+    console.log("📊 Langfuse: REST fallback ingestion is unavailable");
+    return;
+  }
+
+  const response = await withTimeout(
+    "REST fallback ingestion",
+    ingestionBatch({
+      batch,
+      metadata: {
+        source: "pi-langfuse",
+        fallback: "rest-ingestion",
+        reason: "otel-trace-not-visible-after-flush",
+      },
+    }),
+  );
+
+  if (!response) {
+    return;
+  }
 
   const responseBody = response as { errors?: unknown[] } | undefined;
   const errors = Array.isArray(responseBody?.errors) ? responseBody.errors : [];
   if (errors.length > 0) {
     console.warn("📊 Langfuse: REST fallback ingestion reported errors", errors);
   } else {
-    console.warn(`📊 Langfuse: OTel trace ${trace.id} was not visible; wrote fallback trace via REST ingestion`);
+    console.log(`📊 Langfuse: OTel trace ${trace.id} was not visible; wrote fallback trace via REST ingestion`);
   }
 }
 
@@ -356,11 +398,11 @@ function doShutdownRuntime(): Promise<void> {
     runtime = null;
 
     try {
-      await rt.tracerProvider?.forceFlush?.();
+      await withTimeout("OTel force flush", rt.tracerProvider?.forceFlush?.());
       await fallbackToRestIngestion(rt);
-      await rt.scoreClient.flush?.();
-      await rt.scoreClient.shutdown?.();
-      await rt.tracerProvider?.shutdown?.();
+      await withTimeout("Langfuse score flush", rt.scoreClient.flush?.());
+      await withTimeout("Langfuse client shutdown", rt.scoreClient.shutdown?.());
+      await withTimeout("OTel tracer shutdown", rt.tracerProvider?.shutdown?.());
     } catch (e) {
       console.warn("📊 Langfuse: Failed to flush/shutdown cleanly", e);
     } finally {
@@ -398,6 +440,12 @@ export async function shutdownRuntime(sessionId?: string): Promise<void> {
 export async function forceShutdownRuntime(): Promise<void> {
   activeSessions.clear();
   await doShutdownRuntime();
+}
+
+export function __setRuntimeForTest(rt: LangfuseRuntime | null, timeoutMs = DEFAULT_SHUTDOWN_STEP_TIMEOUT_MS): void {
+  runtime = rt;
+  shutdownStepTimeoutMs = timeoutMs;
+  activeSessions.clear();
 }
 
 export async function sendScore(name: string, value: number, options: { traceId?: string; observationId?: string } = {}) {

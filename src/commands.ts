@@ -13,6 +13,7 @@ export interface CommandContextLike {
   hasUI?: boolean;
   ui?: {
     notify?: (message: string, level?: "info" | "warning" | "error") => void;
+    select?: (title: string, options: string[]) => Promise<string | undefined>;
   };
 }
 
@@ -147,38 +148,14 @@ function hasActiveAgentObservation() {
   return false;
 }
 
-export async function handleLangfusePrivacyCommand(
-  args: string,
+function savePrivacyPreset(
+  requestedPreset: PrivacyPreset,
   ctx: CommandContextLike,
-  deps: CommandDeps = {},
-): Promise<boolean> {
-  const configPath = deps.configPath ?? CONFIG_PATH;
-  const parsed = parseCommandArgs(args);
-  if (parsed.malformed.length > 0) {
-    notify(ctx, `Couldn't understand '${parsed.malformed[0]}'. Use /langfuse-privacy preset=metadata-only.`, "warning");
-    return false;
-  }
-
-  const requestedPreset = parsed.values.preset ?? parsed.positional[0];
-  if (!requestedPreset) {
-    state.config = state.config ?? loadConfig(process.env, configPath);
-    const policy = state.config?.capturePolicy ?? createCapturePolicy();
-    notify(ctx, `Current Langfuse privacy preset: ${inferPreset(policy)}\n${describePolicy(policy)}`);
-    return true;
-  }
-
-  if (!isPrivacyPreset(requestedPreset)) {
-    notify(
-      ctx,
-      `Unknown privacy preset '${requestedPreset}'. Use one of: ${PRIVACY_PRESETS.join(", ")}.`,
-      "warning",
-    );
-    return false;
-  }
-
+  configPath: string,
+): boolean {
   const existing = readPersistedConfig(configPath);
   const loaded = state.config ?? loadConfig(process.env, configPath);
-  
+
   const publicKey = existing.publicKey ?? loaded?.publicKey;
   const secretKey = existing.secretKey ?? loaded?.secretKey;
   const host = existing.host ?? loaded?.host;
@@ -199,6 +176,54 @@ export async function handleLangfusePrivacyCommand(
 
   notify(ctx, `Langfuse privacy preset saved: ${requestedPreset}\n${describePolicy(state.config?.capturePolicy ?? createCapturePolicy())}`);
   return true;
+}
+
+export async function handleLangfusePrivacyCommand(
+  args: string,
+  ctx: CommandContextLike,
+  deps: CommandDeps = {},
+): Promise<boolean> {
+  const configPath = deps.configPath ?? CONFIG_PATH;
+  const parsed = parseCommandArgs(args);
+  if (parsed.malformed.length > 0) {
+    notify(ctx, `Couldn't understand '${parsed.malformed[0]}'. Use /langfuse-privacy preset=metadata-only.`, "warning");
+    return false;
+  }
+
+  const requestedPreset = parsed.values.preset ?? parsed.positional[0];
+  if (!requestedPreset) {
+    state.config = state.config ?? loadConfig(process.env, configPath);
+    const policy = state.config?.capturePolicy ?? createCapturePolicy();
+    if (ctx.hasUI && ctx.ui?.select) {
+      const currentPreset = inferPreset(policy);
+      const selectedPreset = await ctx.ui.select(
+        `Langfuse privacy preset (current: ${currentPreset})`,
+        [...PRIVACY_PRESETS],
+      );
+      if (!selectedPreset) {
+        notify(ctx, `Current Langfuse privacy preset: ${currentPreset}\n${describePolicy(policy)}`);
+        return true;
+      }
+      if (!isPrivacyPreset(selectedPreset)) {
+        notify(ctx, `Unknown privacy preset '${selectedPreset}'. Use one of: ${PRIVACY_PRESETS.join(", ")}.`, "warning");
+        return false;
+      }
+      return savePrivacyPreset(selectedPreset, ctx, configPath);
+    }
+    notify(ctx, `Current Langfuse privacy preset: ${inferPreset(policy)}\n${describePolicy(policy)}`);
+    return true;
+  }
+
+  if (!isPrivacyPreset(requestedPreset)) {
+    notify(
+      ctx,
+      `Unknown privacy preset '${requestedPreset}'. Use one of: ${PRIVACY_PRESETS.join(", ")}.`,
+      "warning",
+    );
+    return false;
+  }
+
+  return savePrivacyPreset(requestedPreset, ctx, configPath);
 }
 
 export async function handleLangfuseTestCommand(
@@ -245,8 +270,6 @@ export async function handleLangfuseTestCommand(
         return observation;
       },
     );
-    await rt.tracerProvider?.forceFlush?.();
-    await rt.scoreClient.flush?.();
     notify(ctx, `Langfuse test succeeded. Test trace sent to ${state.config?.host}.`);
     return true;
   } catch (error) {

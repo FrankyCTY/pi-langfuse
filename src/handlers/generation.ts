@@ -184,7 +184,7 @@ export async function finishGenerationFromMessage(event: Record<string, unknown>
     model: model || undefined,
     modelParameters,
     usageDetails,
-    costDetails,
+    ...(costDetails ? { costDetails } : {}),
     metadata: {
       ...generation.metadata,
       finishReason: message.finishReason ?? message.stopReason ?? event.finishReason,
@@ -232,7 +232,7 @@ export async function createFallbackGenerationFromTurn(event: Record<string, unk
         model: model || undefined,
         modelParameters,
         usageDetails,
-        costDetails,
+        ...(costDetails ? { costDetails } : {}),
         metadata: captured.metadata,
       },
       asType: "generation",

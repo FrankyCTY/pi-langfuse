@@ -400,6 +400,9 @@ export function extractCostDetails(messageOrEvent: Record<string, unknown>): Rec
   const input = Number(cost.input ?? cost.inputCost ?? 0);
   const output = Number(cost.output ?? cost.outputCost ?? 0);
   const total = Number(cost.total ?? cost.totalCost ?? input + output);
+  if (input === 0 && output === 0 && total === 0) {
+    return undefined;
+  }
 
   return { input, output, total };
 }

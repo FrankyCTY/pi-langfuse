@@ -15,7 +15,13 @@ interface RestFallbackTrace {
   output?: unknown;
   sessionId?: string;
   metadata?: Record<string, unknown>;
+  tags?: string[];
+  environment?: string;
 }
+
+// Langfuse promotes these OTel span attributes from the root span onto the trace.
+const TRACE_TAGS_ATTR = "langfuse.trace.tags";
+const TRACE_SESSION_ID_ATTR = "session.id";
 
 interface RestFallbackObservation {
   id: string;
@@ -172,13 +178,32 @@ function wrapObservation(
   store.observationById.set(id, record);
 
   if (!parentObservationId && !store.trace) {
+    const sessionId = (typeof metadata?.sessionId === "string" ? metadata.sessionId : undefined) || state.currentSessionId || undefined;
+    const tags = state.config?.tags;
+    const environment = state.config?.environment;
+
+    // propagateAttributes does not reach the trace in this event-driven,
+    // non-active startObservation usage, so set trace-level attributes directly
+    // on the root OTel span. Langfuse promotes these onto the trace.
+    try {
+      const span = (observation as { otelSpan?: { setAttribute?: (key: string, value: unknown) => void } }).otelSpan;
+      if (span?.setAttribute) {
+        if (tags && tags.length) span.setAttribute(TRACE_TAGS_ATTR, tags);
+        if (sessionId) span.setAttribute(TRACE_SESSION_ID_ATTR, sessionId);
+      }
+    } catch {
+      /* best-effort; the REST fallback trace body below still carries them */
+    }
+
     store.trace = {
       id: traceId,
       timestamp: record.startTime,
       name,
       input: body?.input,
-      sessionId: typeof metadata?.sessionId === "string" ? metadata.sessionId : state.currentSessionId || undefined,
+      sessionId,
       metadata,
+      tags,
+      environment,
     };
   }
 
@@ -277,6 +302,8 @@ async function fallbackToRestIngestion(rt: LangfuseRuntime) {
         output: trace.output,
         sessionId: trace.sessionId,
         metadata: trace.metadata,
+        tags: trace.tags,
+        environment: trace.environment,
       },
     },
   ];

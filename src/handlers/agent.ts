@@ -95,11 +95,13 @@ export async function startAgentRun(event: Record<string, unknown>, ctx: any) {
       providerMetadataByRequest: new Map(),
     };
 
+    const extraMetadata = state.config?.extraMetadata ?? {};
     const root = rt.propagateAttributes(
       {
         sessionId: state.currentSessionId ? truncate(state.currentSessionId, 200) : undefined,
         traceName: "pi-agent",
-        metadata: stringMetadata(captured.metadata),
+        metadata: stringMetadata({ ...(captured.metadata ?? {}), ...extraMetadata }),
+        tags: state.config?.tags,
       },
       () =>
         rt.startObservation(
@@ -108,6 +110,7 @@ export async function startAgentRun(event: Record<string, unknown>, ctx: any) {
               input: captured.input,
               metadata: {
                 ...(captured.metadata ?? {}),
+                ...extraMetadata,
                 ...(captured.systemPrompt ? { systemPrompt: captured.systemPrompt } : {}),
               },
             },

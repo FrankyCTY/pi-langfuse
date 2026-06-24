@@ -375,6 +375,7 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
       publicKey: state.config.publicKey,
       secretKey: state.config.secretKey,
       baseUrl: state.config.host,
+      ...(state.config.environment ? { environment: state.config.environment } : {}),
     });
     const tracerProvider = new BasicTracerProvider({ spanProcessors: [spanProcessor] });
     tracing.setLangfuseTracerProvider(tracerProvider);

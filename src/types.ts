@@ -5,6 +5,12 @@ export interface Config {
   secretKey: string;
   host: string;
   capturePolicy?: CapturePolicy;
+  // Tracing environment (Langfuse `environment`), e.g. "production". From LANGFUSE_TRACING_ENVIRONMENT.
+  environment?: string;
+  // Trace-level tags applied to every trace. From LANGFUSE_TRACE_TAGS (comma-separated).
+  tags?: string[];
+  // Extra trace metadata merged onto the root observation. From LANGFUSE_TRACE_METADATA (JSON object).
+  extraMetadata?: Record<string, string>;
 }
 
 export interface LangfuseObservation {

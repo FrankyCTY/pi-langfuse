@@ -6,6 +6,50 @@ import { state } from "./state.js";
 import { forceShutdownRuntime } from "./langfuse.js";
 import { createCapturePolicy, type EnvLike } from "./capture-policy.js";
 
+/** Parse a comma-separated `LANGFUSE_TRACE_TAGS` value into a tag list. */
+export function parseTags(raw?: string): string[] | undefined {
+  const tags = (raw ?? "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  return tags.length ? tags : undefined;
+}
+
+/** Parse a JSON object from `LANGFUSE_TRACE_METADATA`; ignore malformed input. */
+export function parseTraceMetadata(raw?: string): Record<string, string> | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return undefined;
+    }
+    const output: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (value !== null && value !== undefined) {
+        output[key] = String(value);
+      }
+    }
+    return Object.keys(output).length ? output : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Trace-routing attributes sourced from the environment regardless of how
+ * credentials are configured (env or config.json). These let an external
+ * launcher tag and route traces without the extension knowing the launcher.
+ */
+function readTraceAttributes(env: EnvLike): Pick<Config, "environment" | "tags" | "extraMetadata"> {
+  return {
+    environment: env.LANGFUSE_TRACING_ENVIRONMENT || undefined,
+    tags: parseTags(env.LANGFUSE_TRACE_TAGS),
+    extraMetadata: parseTraceMetadata(env.LANGFUSE_TRACE_METADATA),
+  };
+}
+
 export function loadConfigFromFile(path = CONFIG_PATH, env: EnvLike = process.env as EnvLike): Config | null {
   if (existsSync(path)) {
     try {
@@ -22,6 +66,7 @@ export function loadConfigFromFile(path = CONFIG_PATH, env: EnvLike = process.en
           secretKey: config.secretKey,
           host: config.host || DEFAULT_LANGFUSE_HOST,
           capturePolicy: createCapturePolicy(captureSource),
+          ...readTraceAttributes(env),
         };
       }
     } catch (e) {
@@ -44,6 +89,7 @@ export function loadConfigFromEnv(env: EnvLike = process.env as EnvLike): Config
     secretKey,
     host: env.LANGFUSE_BASE_URL || env.LANGFUSE_HOST || DEFAULT_LANGFUSE_HOST,
     capturePolicy: createCapturePolicy(env),
+    ...readTraceAttributes(env),
   };
 }
 
